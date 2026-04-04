@@ -4,40 +4,16 @@ LABEL maintainer="Rexplore Research Labs <hello@rexplore.ai>"
 LABEL description="Luso8 Telephony Core — Asterisk PBX for AI Call Centers"
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV ASTERISK_USER=asterisk
 
-# ---- System dependencies ----
+# ---- Install Asterisk from Ubuntu packages (no source compile) ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libssl-dev \
-    libncurses5-dev \
-    libnewt-dev \
-    libxml2-dev \
-    libsqlite3-dev \
-    uuid-dev \
-    libjansson-dev \
-    libxslt1-dev \
-    libcurl4-openssl-dev \
-    libedit-dev \
-    libsrtp2-dev \
-    gettext-base \
-    wget \
+    asterisk \
+    asterisk-config \
+    asterisk-core-sounds-en-wav \
+    asterisk-moh-opsound-wav \
     curl \
-    git \
+    gettext-base \
     && rm -rf /var/lib/apt/lists/*
-
-# ---- Create asterisk user ----
-RUN useradd -r -d /var/lib/asterisk -s /sbin/nologin asterisk
-
-# ---- Copy source and build ----
-WORKDIR /usr/src/asterisk
-COPY . .
-
-RUN ./configure --with-jansson-bundled --with-ssl=ssl \
-    && make -j$(nproc) \
-    && make install \
-    && make samples \
-    && ldconfig
 
 # ---- Create runtime directories ----
 RUN mkdir -p \
