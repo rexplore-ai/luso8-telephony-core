@@ -1,0 +1,69 @@
+version: "3.9"
+
+# Luso8 Telephony Core — Docker Compose
+# Use for local development and single-server deployments.
+#
+# IMPORTANT: network_mode: host is required for SIP/RTP to work correctly.
+# Docker bridge networking introduces NAT that breaks SIP media.
+# Only use bridge networking if you have a dedicated SIP proxy (e.g., Kamailio).
+#
+# Usage:
+#   cp ../.env.example ../.env
+#   # Edit .env with your real values
+#   docker-compose up --build
+
+services:
+  asterisk:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: luso8-asterisk
+    restart: unless-stopped
+
+    # network_mode: host is required for SIP/RTP port handling
+    # Remove this and uncomment 'ports' below only for dev/testing without real SIP trunk
+    network_mode: host
+
+    # Uncomment for dev without real SIP (bridge network mode only)
+    # ports:
+    #   - "5060:5060/udp"
+    #   - "5060:5060/tcp"
+    #   - "8088:8088/tcp"
+    #   - "10000-10100:10000-10100/udp"
+
+    env_file:
+      - ../.env
+
+    volumes:
+      # Persist logs
+      - asterisk_logs:/var/log/asterisk
+      # Persist call recordings
+      - asterisk_recordings:/var/spool/asterisk/recording
+      # Persist Asterisk internal database (queue members, etc.)
+      - asterisk_astdb:/var/lib/asterisk
+      # Mount per-tenant config fragments (written by Voxtra TenantProvisioner)
+      # Create these local directories first: mkdir -p tenant-configs/{pjsip,extensions,ari}
+      # In production, the Voxtra Provisioner writes fragments directly to these paths.
+      - ./tenant-configs/pjsip:/etc/asterisk/pjsip.d:ro
+      - ./tenant-configs/extensions:/etc/asterisk/extensions.d:ro
+      - ./tenant-configs/ari:/etc/asterisk/ari.d:ro
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "-u",
+             "${ARI_USERNAME}:${ARI_PASSWORD}",
+             "http://localhost:${ARI_PORT:-8088}/ari/asterisk/info"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  asterisk_logs:
+  asterisk_recordings:
+  asterisk_astdb:

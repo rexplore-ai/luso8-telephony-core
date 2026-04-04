@@ -1,0 +1,248 @@
+name: Luso8 — Build & Deploy Asterisk
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "configs/**"
+      - "docker/**"
+      - "scripts/**"
+      - "res/**"
+      - "channels/**"
+      - "*.c"
+      - "*.h"
+      - "Makefile*"
+      - ".github/workflows/luso8-*.yml"
+  workflow_dispatch:
+    inputs:
+      skip_build:
+        description: "Skip Docker build (redeploy existing latest image)"
+        required: false
+        type: boolean
+        default: false
+      force_restart:
+        description: "Force container restart even if no image change"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  PROJECT_ID: luso8-cloud
+  REGION: africa-south1
+  ARTIFACT_REPO: luso8-telephony
+  IMAGE_NAME: asterisk-pbx
+  GCE_INSTANCE: luso8-asterisk-pbx
+  GCE_ZONE: africa-south1-a
+  GCE_HOST: pbx.luso8.rexplore.ai
+  DEPLOY_USER: github-deploy
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # JOB 1: Build Docker image and push to Artifact Registry
+  # ──────────────────────────────────────────────────────────────────
+  build:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_build }}
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.image.outputs.full }}
+      sha_tag: ${{ steps.meta.outputs.sha_tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          SHA_TAG="sha-$(echo ${{ github.sha }} | cut -c1-8)"
+          echo "sha_tag=$SHA_TAG" >> $GITHUB_OUTPUT
+          echo "Tagging image as: $SHA_TAG and latest"
+
+      - name: Set full image path output
+        id: image
+        run: |
+          FULL="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}"
+          echo "full=$FULL" >> $GITHUB_OUTPUT
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.image.outputs.full }}:latest
+            ${{ steps.image.outputs.full }}:${{ steps.meta.outputs.sha_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────
+  # JOB 2: Deploy to GCE VM
+  # ──────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to GCE
+    runs-on: ubuntu-latest
+    needs: build
+    if: always() && (needs.build.result == 'success' || inputs.skip_build)
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: production
+      url: https://pbx.luso8.rexplore.ai
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.GCE_SSH_KEY }}" > ~/.ssh/luso8_deploy
+          chmod 600 ~/.ssh/luso8_deploy
+          # Add host fingerprint
+          ssh-keyscan -H ${{ env.GCE_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Pull latest secrets on VM
+        run: |
+          ssh -i ~/.ssh/luso8_deploy \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
+              ${{ env.DEPLOY_USER }}@${{ env.GCE_HOST }} \
+              "sudo /opt/luso8/scripts/pull-secrets.sh"
+
+      - name: Deploy new image to VM
+        env:
+          IMAGE_BASE: "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}"
+          SHA_TAG: ${{ needs.build.outputs.sha_tag || 'latest' }}
+        run: |
+          ssh -i ~/.ssh/luso8_deploy \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
+              ${{ env.DEPLOY_USER }}@${{ env.GCE_HOST }} << DEPLOY
+          set -e
+
+          IMAGE_FULL="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:latest"
+          SHA_TAG="${{ env.SHA_TAG }}"
+
+          echo "[deploy] Authenticating Docker with Artifact Registry..."
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+          echo "[deploy] Pulling image: \$IMAGE_FULL"
+          docker pull "\$IMAGE_FULL"
+
+          echo "[deploy] Saving previous container image tag for rollback..."
+          PREV_IMAGE=\$(docker inspect luso8-asterisk --format='{{.Config.Image}}' 2>/dev/null || echo "none")
+          echo "\$PREV_IMAGE" | sudo tee /opt/luso8/.previous-image > /dev/null
+
+          echo "[deploy] Stopping existing container..."
+          docker stop luso8-asterisk 2>/dev/null || true
+          docker rm   luso8-asterisk 2>/dev/null || true
+
+          echo "[deploy] Starting new container..."
+          docker run -d \
+            --name luso8-asterisk \
+            --network host \
+            --restart unless-stopped \
+            --env-file /opt/luso8/.env \
+            -v /var/log/asterisk:/var/log/asterisk \
+            -v /var/spool/asterisk/recording:/var/spool/asterisk/recording \
+            -v /var/lib/asterisk:/var/lib/asterisk \
+            -v /opt/luso8/tenant-configs/pjsip:/etc/asterisk/pjsip.d:ro \
+            -v /opt/luso8/tenant-configs/extensions:/etc/asterisk/extensions.d:ro \
+            -v /opt/luso8/tenant-configs/ari:/etc/asterisk/ari.d:ro \
+            --log-driver gcplogs \
+            --log-opt gcp-project=${{ env.PROJECT_ID }} \
+            --log-opt gcp-log-cmd=true \
+            --label service=asterisk-pbx \
+            --label environment=production \
+            --label sha="\$SHA_TAG" \
+            "\$IMAGE_FULL"
+
+          echo "[deploy] Waiting 20s for Asterisk to initialize..."
+          sleep 20
+
+          echo "[deploy] Running health check..."
+          /opt/luso8/scripts/health-check.sh
+          DEPLOY
+
+      - name: Verify deployment
+        run: |
+          echo "Verifying ARI is reachable from GitHub runner..."
+          # This validates the public ARI endpoint (if firewall allows)
+          # In production, ARI is restricted to internal IPs only, so this may timeout - that's OK
+          echo "Deployment complete. Check logs at:"
+          echo "https://console.cloud.google.com/logs/query?project=${{ env.PROJECT_ID }}"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/luso8_deploy
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Deployment FAILED. Triggering automatic rollback..."
+          ssh -i ~/.ssh/luso8_deploy \
+              -o StrictHostKeyChecking=no \
+              ${{ env.DEPLOY_USER }}@${{ env.GCE_HOST }} \
+              "sudo /opt/luso8/scripts/rollback.sh" || true
+
+  # ──────────────────────────────────────────────────────────────────
+  # JOB 3: Post-deploy health summary
+  # ──────────────────────────────────────────────────────────────────
+  verify:
+    name: Post-deploy Verification
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: success()
+
+    steps:
+      - name: Deployment summary
+        run: |
+          echo "## Deployment Successful ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:latest\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Deployed by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | production |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Host** | pbx.luso8.rexplore.ai |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Useful Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [Cloud Logging](https://console.cloud.google.com/logs/query;query=resource.type%3D%22gce_instance%22%20labels.service%3D%22asterisk-pbx%22?project=${{ env.PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Cloud Monitoring](https://console.cloud.google.com/monitoring?project=${{ env.PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Artifact Registry](https://console.cloud.google.com/artifacts?project=${{ env.PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,198 @@
+name: Luso8 — Validate PR
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "configs/**"
+      - "docker/**"
+      - "scripts/**"
+      - ".github/workflows/luso8-*.yml"
+
+env:
+  PROJECT_ID: luso8-cloud
+  REGION: africa-south1
+  ARTIFACT_REPO: luso8-telephony
+  IMAGE_NAME: asterisk-pbx
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # JOB 1: Validate Docker build
+  # ──────────────────────────────────────────────────────────────────
+  docker-build:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          tags: luso8-asterisk:pr-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────
+  # JOB 2: Validate config templates
+  # ──────────────────────────────────────────────────────────────────
+  config-lint:
+    name: Config Template Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check all required template variables are present
+        run: |
+          echo "=== Checking config templates for required variables ==="
+
+          REQUIRED_VARS=(
+            "ARI_USERNAME"
+            "ARI_PASSWORD"
+            "ARI_PORT"
+            "ARI_BIND_ADDR"
+            "ARI_APP_NAME"
+            "EXTERNAL_IP"
+            "LOCAL_NET"
+            "SIP_DOMAIN"
+            "SIP_TRUNK_HOST"
+            "SIP_TRUNK_PORT"
+            "SIP_TRUNK_USER"
+            "SIP_TRUNK_PASS"
+            "SIP_TRUNK_REALM"
+            "DEFAULT_CONTEXT"
+            "OUTBOUND_CALLER_ID"
+            "RTP_PORT_START"
+            "RTP_PORT_END"
+            "LOG_LEVEL"
+          )
+
+          ERRORS=0
+          for var in "${REQUIRED_VARS[@]}"; do
+            # Check each var appears in at least one config template
+            if ! grep -r "\${${var}}" configs/luso8/ > /dev/null 2>&1; then
+              echo "  WARNING: \${${var}} not found in any config template"
+            else
+              echo "  OK: \${${var}}"
+            fi
+          done
+
+          echo ""
+          echo "=== Checking .env.example covers all required variables ==="
+          for var in "${REQUIRED_VARS[@]}"; do
+            if ! grep -q "^${var}=" .env.example; then
+              echo "  MISSING from .env.example: $var"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            echo "::error::$ERRORS variable(s) missing from .env.example"
+            exit 1
+          fi
+
+          echo "All variables validated."
+
+      - name: Validate entrypoint.sh syntax
+        run: bash -n docker/entrypoint.sh && echo "entrypoint.sh syntax OK"
+
+      - name: Validate shell scripts syntax
+        run: |
+          for script in scripts/*.sh; do
+            bash -n "$script" && echo "  OK: $script" || {
+              echo "::error::Syntax error in $script"
+              exit 1
+            }
+          done
+
+      - name: Check pull-secrets.sh covers all .env.example variables
+        run: |
+          echo "=== Verifying pull-secrets.sh writes all variables ==="
+          ERRORS=0
+
+          while IFS= read -r line; do
+            # Skip comments and empty lines
+            [[ "$line" =~ ^#.*$ ]] && continue
+            [[ -z "$line" ]] && continue
+
+            VAR_NAME="${line%%=*}"
+            if ! grep -q "$VAR_NAME" scripts/pull-secrets.sh; then
+              echo "  WARNING: $VAR_NAME not in pull-secrets.sh"
+            fi
+          done < .env.example
+
+          echo "Done."
+
+  # ──────────────────────────────────────────────────────────────────
+  # JOB 3: Security checks
+  # ──────────────────────────────────────────────────────────────────
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check no secrets hardcoded in configs
+        run: |
+          echo "=== Scanning for hardcoded secrets ==="
+          ERRORS=0
+
+          # Patterns that indicate hardcoded secrets
+          PATTERNS=(
+            "password\s*=\s*[a-zA-Z0-9+/]{8,}"
+            "secret\s*=\s*[a-zA-Z0-9+/]{8,}"
+            "api_key\s*=\s*[a-zA-Z0-9+/]{8,}"
+          )
+
+          for pattern in "${PATTERNS[@]}"; do
+            MATCHES=$(grep -r -i -E "$pattern" configs/ --include="*.conf" \
+              | grep -v "CHANGE_ME\|YOUR_\|EXAMPLE\|sample\|\\\${" || true)
+            if [ -n "$MATCHES" ]; then
+              echo "::warning::Possible hardcoded value:"
+              echo "$MATCHES"
+            fi
+          done
+
+          # Ensure .env is in .gitignore
+          if ! grep -q "^\.env$" .gitignore; then
+            echo "::error::.env is not in .gitignore — this is a security risk"
+            ERRORS=$((ERRORS + 1))
+          else
+            echo "  OK: .env is in .gitignore"
+          fi
+
+          if [ $ERRORS -gt 0 ]; then
+            exit 1
+          fi
+          echo "Security checks passed."
+
+      - name: Check Dockerfile for security best practices
+        run: |
+          echo "=== Dockerfile security checks ==="
+
+          # Should NOT run as root
+          if ! grep -q "USER asterisk" docker/Dockerfile; then
+            echo "::warning::Dockerfile should set USER asterisk (non-root)"
+          else
+            echo "  OK: Non-root user configured"
+          fi
+
+          # Should have HEALTHCHECK
+          if ! grep -q "HEALTHCHECK" docker/Dockerfile; then
+            echo "::warning::Dockerfile should have a HEALTHCHECK instruction"
+          else
+            echo "  OK: HEALTHCHECK defined"
+          fi
+
+          echo "Dockerfile checks complete."

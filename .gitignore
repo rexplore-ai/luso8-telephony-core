@@ -38,3 +38,8 @@ out/
 *.orig
 tests/CI/output
 .develvars
+
+# Luso8 — never commit secrets
+.env
+.env.local
+.env.production
