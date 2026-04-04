@@ -1,8 +1,8 @@
-name: Luso8 — Validate PR
+name: Luso8 - Validate PR
 
 on:
   pull_request:
-    branches: [main]
+    branches: [master]
     paths:
       - "configs/**"
       - "docker/**"

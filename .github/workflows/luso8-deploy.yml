@@ -1,8 +1,8 @@
-name: Luso8 — Build & Deploy Asterisk
+name: Luso8 - Build & Deploy Asterisk
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - "configs/**"
       - "docker/**"
