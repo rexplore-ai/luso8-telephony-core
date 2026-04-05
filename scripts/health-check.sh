@@ -81,7 +81,7 @@ fi
 # ── 4. SIP trunk registration ─────────────────────────────────────────────────
 echo ""
 echo "SIP Trunk:"
-if [ "${SIP_TRUNK_HOST:-PLACEHOLDER}" = "PLACEHOLDER" ]; then
+if [[ "${SIP_TRUNK_HOST:-PLACEHOLDER}" == PLACEHOLDER* ]]; then
     warn "SIP trunk not configured yet (set from Luso8 admin dashboard)"
 else
     REG_STATUS=$(sudo docker exec luso8-asterisk \
