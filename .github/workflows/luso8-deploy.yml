@@ -136,6 +136,22 @@ jobs:
           # Add host fingerprint
           ssh-keyscan -H ${{ env.GCE_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
+      - name: Sync scripts to VM
+        run: |
+          scp -i ~/.ssh/luso8_deploy \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
+              scripts/pull-secrets.sh \
+              scripts/health-check.sh \
+              scripts/reload-config.sh \
+              scripts/rollback.sh \
+              scripts/sync-recordings.sh \
+              ${{ env.DEPLOY_USER }}@${{ env.GCE_HOST }}:/opt/luso8/scripts/
+          ssh -i ~/.ssh/luso8_deploy \
+              -o StrictHostKeyChecking=no \
+              ${{ env.DEPLOY_USER }}@${{ env.GCE_HOST }} \
+              "chmod +x /opt/luso8/scripts/*.sh"
+
       - name: Pull latest secrets on VM
         run: |
           ssh -i ~/.ssh/luso8_deploy \
