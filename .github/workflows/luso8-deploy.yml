@@ -176,6 +176,7 @@ jobs:
 
           echo "[deploy] Authenticating Docker with Artifact Registry..."
           gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+          sudo gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
           echo "[deploy] Pulling image: \$IMAGE_FULL"
           sudo docker pull "\$IMAGE_FULL"
