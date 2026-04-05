@@ -178,21 +178,34 @@ jobs:
           gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
           echo "[deploy] Pulling image: \$IMAGE_FULL"
-          docker pull "\$IMAGE_FULL"
+          sudo docker pull "\$IMAGE_FULL"
+
+          echo "[deploy] Ensuring host directories exist with correct ownership (asterisk uid=101)..."
+          sudo mkdir -p /var/log/asterisk /var/spool/asterisk/recording /var/lib/asterisk /var/run/asterisk
+          sudo chown -R 101:101 /var/log/asterisk /var/spool/asterisk /var/lib/asterisk /var/run/asterisk
+
+          echo "[deploy] Ensuring tenant-config placeholder files exist..."
+          sudo mkdir -p /opt/luso8/tenant-configs/pjsip /opt/luso8/tenant-configs/ari /opt/luso8/tenant-configs/extensions
+          for dir in pjsip ari extensions; do
+            f="/opt/luso8/tenant-configs/\$dir/000-placeholder.conf"
+            [ -f "\$f" ] || printf '; placeholder\n' | sudo tee "\$f" > /dev/null
+          done
 
           echo "[deploy] Saving previous container image tag for rollback..."
-          PREV_IMAGE=\$(docker inspect luso8-asterisk --format='{{.Config.Image}}' 2>/dev/null || echo "none")
+          PREV_IMAGE=\$(sudo docker inspect luso8-asterisk --format='{{.Config.Image}}' 2>/dev/null || echo "none")
           echo "\$PREV_IMAGE" | sudo tee /opt/luso8/.previous-image > /dev/null
 
           echo "[deploy] Stopping existing container..."
-          docker stop luso8-asterisk 2>/dev/null || true
-          docker rm   luso8-asterisk 2>/dev/null || true
+          sudo docker stop luso8-asterisk 2>/dev/null || true
+          sudo docker rm   luso8-asterisk 2>/dev/null || true
 
           echo "[deploy] Starting new container..."
-          docker run -d \
+          sudo docker run -d \
             --name luso8-asterisk \
             --network host \
             --restart unless-stopped \
+            --cap-add NET_ADMIN \
+            --cap-add SYS_NICE \
             --env-file /opt/luso8/.env \
             -v /var/log/asterisk:/var/log/asterisk \
             -v /var/spool/asterisk/recording:/var/spool/asterisk/recording \

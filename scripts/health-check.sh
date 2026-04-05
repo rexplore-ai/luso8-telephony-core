@@ -31,12 +31,12 @@ fi
 # ── 1. Docker container running ───────────────────────────────────────────────
 echo ""
 echo "Container:"
-STATE=$(docker inspect luso8-asterisk --format='{{.State.Status}}' 2>/dev/null || echo "not_found")
+STATE=$(sudo docker inspect luso8-asterisk --format='{{.State.Status}}' 2>/dev/null || echo "not_found")
 if [ "$STATE" = "running" ]; then
     ok "Container luso8-asterisk is running"
-    STARTED=$(docker inspect luso8-asterisk --format='{{.State.StartedAt}}' 2>/dev/null)
+    STARTED=$(sudo docker inspect luso8-asterisk --format='{{.State.StartedAt}}' 2>/dev/null)
     echo "         Started: $STARTED"
-    IMAGE=$(docker inspect luso8-asterisk --format='{{.Config.Image}}' 2>/dev/null)
+    IMAGE=$(sudo docker inspect luso8-asterisk --format='{{.Config.Image}}' 2>/dev/null)
     echo "         Image  : $IMAGE"
 else
     fail "Container luso8-asterisk is $STATE"
@@ -84,7 +84,7 @@ echo "SIP Trunk:"
 if [ "${SIP_TRUNK_HOST:-PLACEHOLDER}" = "PLACEHOLDER" ]; then
     warn "SIP trunk not configured yet (set from Luso8 admin dashboard)"
 else
-    REG_STATUS=$(docker exec luso8-asterisk \
+    REG_STATUS=$(sudo docker exec luso8-asterisk \
         /usr/sbin/asterisk -rx "pjsip show registrations" 2>/dev/null \
         | grep -i "Registered\|Rejected\|Unregistered" | head -1 || echo "unable to query")
     if echo "$REG_STATUS" | grep -qi "Registered"; then
@@ -97,7 +97,7 @@ fi
 # ── 5. Active calls ───────────────────────────────────────────────────────────
 echo ""
 echo "Call Stats:"
-CHANNELS=$(docker exec luso8-asterisk \
+CHANNELS=$(sudo docker exec luso8-asterisk \
     /usr/sbin/asterisk -rx "core show channels count" 2>/dev/null \
     | grep -oP '\d+ active call' || echo "0 active calls")
 ok "$CHANNELS"

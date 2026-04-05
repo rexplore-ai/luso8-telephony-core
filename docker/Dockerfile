@@ -27,6 +27,11 @@ RUN mkdir -p \
     /var/spool/asterisk/recording \
     /var/lib/asterisk
 
+# ---- Placeholder configs so #include *.conf globs never fail on empty dirs ----
+RUN printf '; placeholder\n' > /etc/asterisk/pjsip.d/000-placeholder.conf \
+ && printf '; placeholder\n' > /etc/asterisk/ari.d/000-placeholder.conf \
+ && printf '; placeholder\n' > /etc/asterisk/extensions.d/000-placeholder.conf
+
 # ---- Copy Luso8 config templates ----
 COPY configs/luso8/asterisk.conf    /etc/asterisk/asterisk.conf
 COPY configs/luso8/http.conf        /etc/asterisk/http.conf.tmpl
