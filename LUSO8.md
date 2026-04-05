@@ -12,6 +12,7 @@ This is the Asterisk PBX source code that powers the telephony layer of the Luso
 |---|---|
 | **[docs/README.md](docs/README.md)** | Project overview and 5-minute quick start |
 | **[docs/gcp-setup.md](docs/gcp-setup.md)** | **Start here** — full GCP CI/CD deployment with Secret Manager |
+| **[docs/admin-integration.md](docs/admin-integration.md)** | **Full-stack wiring** — Luso8 UI → backend → Voxtra → Asterisk, with implementation guide |
 | **[docs/deployment.md](docs/deployment.md)** | How to deploy: VPS, Google Cloud Compute Engine, Docker |
 | **[docs/configuration.md](docs/configuration.md)** | All config files, environment variables, and what needs to be done |
 | **[docs/voxtra-vision.md](docs/voxtra-vision.md)** | What the Voxtra library should focus on — design spec |

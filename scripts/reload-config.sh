@@ -25,7 +25,7 @@ echo "[reload] Reloading Asterisk configuration..."
 
 reload_module() {
     local MOD="$1"
-    docker exec luso8-asterisk \
+    sudo docker exec luso8-asterisk \
         /usr/sbin/asterisk -rx "module reload $MOD" 2>/dev/null \
         && echo "[reload]   $MOD reloaded" \
         || echo "[reload]   WARNING: $MOD reload returned non-zero"
@@ -37,7 +37,7 @@ reload_module "res_pjsip_session.so"
 reload_module "res_pjsip_outbound_registration.so"
 
 # Reload dialplan (picks up new extension/context changes)
-docker exec luso8-asterisk \
+sudo docker exec luso8-asterisk \
     /usr/sbin/asterisk -rx "dialplan reload" 2>/dev/null \
     && echo "[reload]   Dialplan reloaded" || true
 
@@ -48,7 +48,7 @@ reload_module "res_ari.so"
 # The container uses envsubst on startup — for a live reload, we need to
 # regenerate configs inside the running container from the updated .env
 echo "[reload] Regenerating config files inside container..."
-docker exec luso8-asterisk bash -c '
+sudo docker exec luso8-asterisk bash -c '
     source /proc/1/environ 2>/dev/null || true
     for TMPL in /etc/asterisk/*.conf.tmpl; do
         DEST="${TMPL%.tmpl}"
@@ -58,7 +58,7 @@ docker exec luso8-asterisk bash -c '
 
 # Reload again after config regeneration
 reload_module "res_pjsip.so"
-docker exec luso8-asterisk /usr/sbin/asterisk -rx "dialplan reload" 2>/dev/null || true
+sudo docker exec luso8-asterisk /usr/sbin/asterisk -rx "dialplan reload" 2>/dev/null || true
 
 # ── 4. Verify after reload ────────────────────────────────────────────────────
 sleep 3
