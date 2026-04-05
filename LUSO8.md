@@ -40,19 +40,30 @@ Production-ready Asterisk config templates live in [`configs/luso8/`](configs/lu
 
 ## CI/CD Deployment (GCP)
 
+Infrastructure is **already provisioned** on `luso8-cloud`. VM is live at `34.35.43.82`.
+
 ```bash
-# 1. Run one-time infrastructure setup (creates VM, secrets, firewall, bucket)
-chmod +x scripts/*.sh
-./scripts/gcp-setup.sh
+# Deploy: push to master — GitHub Actions builds, pushes, and deploys automatically
+git push origin master
 
-# 2. Add 2 GitHub Secrets from the setup output:
-#    GCP_SA_KEY  → /tmp/luso8-github-sa-key.json
-#    GCE_SSH_KEY → printed SSH private key
+# Or trigger manually:
+# GitHub → Actions → "Luso8 — Build & Deploy Asterisk" → Run workflow
+```
 
-# 3. Add Cloudflare DNS A record: pbx.luso8.rexplore.ai → GCE static IP (proxy OFF)
+**GitHub Environment Secrets** (in `production` environment — already configured):
 
-# 4. Push to main → GitHub Actions builds, pushes, and deploys automatically
-git push origin main
+| Secret | Purpose |
+|---|---|
+| `GCE_SSH_KEY` | SSH into `github-deploy@34.35.43.82` |
+| `WIF_PROVIDER` | Workload Identity Federation (no SA key needed) |
+| `WIF_SA` | `luso8-github-actions@luso8-cloud.iam.gserviceaccount.com` |
+
+**ARI credentials for Luso8 UI** (from Secret Manager):
+```bash
+ARI_USERNAME=asterisk
+ARI_PASSWORD=$(gcloud secrets versions access latest --secret=luso8-pbx-ari-password --project=luso8-cloud)
+ARI_URL=http://34.35.43.82:8088
+SIP_DOMAIN=pbx.luso8.rexplore.ai
 ```
 
 See [docs/gcp-setup.md](docs/gcp-setup.md) for the full guide.
