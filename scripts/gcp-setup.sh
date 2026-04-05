@@ -108,13 +108,7 @@ for ROLE in \
 done
 
 echo ""
-echo "  Generating GitHub Actions SA key..."
-gcloud iam service-accounts keys create /tmp/luso8-github-sa-key.json \
-    --iam-account="$SA_GH_EMAIL" --project="$PROJECT_ID"
-
-echo "  ⚠️  KEY GENERATED: /tmp/luso8-github-sa-key.json"
-echo "  → Add the contents of this file to GitHub Secret: GCP_SA_KEY"
-echo "  → Then DELETE the file: rm /tmp/luso8-github-sa-key.json"
+echo "  ✓ GCP auth uses Workload Identity Federation (no SA key needed)."
 echo ""
 
 # ── 5. Reserve Static IP ─────────────────────────────────────────────────────
@@ -315,9 +309,7 @@ echo "   Name: pbx.luso8.rexplore.ai"
 echo "   IPv4: $STATIC_IP"
 echo "   Proxy: OFF (DNS only — required for SIP/RTP)"
 echo ""
-echo "2. Add GitHub Repository Secrets:"
-echo "   GCP_SA_KEY  → contents of /tmp/luso8-github-sa-key.json"
-echo "   GCE_SSH_KEY → the SSH private key printed above"
+echo "2. GitHub Secrets already configured (WIF + GCE_SSH_KEY)."
 echo ""
 echo "3. Wait ~3 mins for VM startup script to run, then verify:"
 echo "   ssh github-deploy@$STATIC_IP 'docker ps'"
