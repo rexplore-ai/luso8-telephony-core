@@ -92,9 +92,9 @@ LOG_LEVEL=notice
 RECORDINGS_BUCKET=${RECORDINGS_BUCKET:-luso8-call-recordings}
 EOF
 
-chmod 600 "$TMP_ENV"
+chmod 640 "$TMP_ENV"
 mv "$TMP_ENV" "$ENV_FILE"
-chown root:root "$ENV_FILE"
+chown root:docker "$ENV_FILE"
 
 echo "[pull-secrets] .env written to $ENV_FILE"
 echo "[pull-secrets] ARI user     : ${ARI_USERNAME}"
